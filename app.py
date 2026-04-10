@@ -22,7 +22,6 @@ with st.sidebar:
     efficiency_twh = st.slider('Effizienzmassnahmen [TWh/Jahr]', min_value=0.0, max_value=15.0, value=5.0, step=0.5)
     nuclear_gw = st.slider('AKW-Leistung [GW]', min_value=0.0, max_value=3.0, value=1.6, step=0.1)
     battery_gwh = st.slider('Batteriespeicher [GWh]', min_value=50, max_value=200, value=100, step=10)
-    balance_days = st.slider('Bilanzfenster [Tage]', min_value=2, max_value=5, value=3, step=1)
 
     st.markdown('---')
     st.caption('Fix eingebaut: Pumpspeicher, Speicherwasserkraft Sommer und Speicherwasserkraft Winter, kein Export')
@@ -37,8 +36,8 @@ inputs = SimulationInputs(
     efficiency_twh=efficiency_twh,
     nuclear_gw=nuclear_gw,
     battery_gwh=float(battery_gwh),
-    balance_days=balance_days,
 )
+
 results = run_simulation(inputs)
 
 c1, c2, c3, c4 = st.columns(4)
@@ -80,7 +79,7 @@ start = results.hourly['timestamp'].min()
 end = results.hourly['timestamp'].max() - pd.Timedelta(days=7)
 default_start = pd.Timestamp(results.hourly['timestamp'].min()) + pd.Timedelta(days=15)
 window_start = st.date_input('Startdatum', value=default_start.date(), min_value=start.date(), max_value=end.date())
-window_hours = balance_days * 24
+window_hours = 120
 
 view = results.hourly[
     (results.hourly['timestamp'] >= pd.Timestamp(window_start))
@@ -129,6 +128,6 @@ with st.expander('Vereinfachungen und Annahmen'):
         '- Speicherwasserkraft Sommer als feste Produktion von 9.8 TWh im Sommerhalbjahr.\n'
         '- Speicherwasserkraft Winter nur Oktober bis März mit maximal 8 TWh Winterenergie.\n'
         '- Kein Export. Verbleibende Überschüsse werden abgeregelt.\n'
-        '- Das Bilanzfenster wird in dieser ersten Version didaktisch für die Anzeige genutzt; '
-        'die Speicherbilanz läuft stündlich und rollierend über das ganze Jahr.'
+        '- Die Speicherbilanz läuft stündlich und rollierend über das ganze Jahr.\n'
+        '- Kurzfristige Verschiebung wird über Batterie und Pumpspeicher abgebildet, nicht über ein separates Bilanzfenster.'
     )
