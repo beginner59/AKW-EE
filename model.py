@@ -1,214 +1,202 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
-import streamlit as st
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
-from model import PHS_ENERGY_GWH, PHS_POWER_GW, REST_TWH, SimulationInputs, run_simulation
+DATA_DIR = Path(__file__).resolve().parent / 'data'
 
-st.set_page_config(page_title='AKW + EE Demo', layout='wide')
+# Feste Annahmen für den Prototyp
+BASE_LOAD_TWH = 92.0
 
-st.title('AKW + EE Demo')
-st.markdown(
-    'Diese Demo illustriert vereinfacht, dass zusätzliche AKW-Leistung in einem stark erneuerbaren, '
-    'dekarbonisierten Stromsystem zu mehr nicht nutzbarem Strom führen kann.'
-)
+# Restliche Anlagen ohne Speicherwasserkraft:
+# Laufwasserkraft + Biomasse/Biogas + erneuerbarer thermischer/KVA-Anteil
+REST_TWH = 20.0
 
-with st.sidebar:
-    st.header('Eingaben')
-    pv_twh = st.slider('PV [TWh/Jahr]', min_value=30.0, max_value=60.0, value=45.0, step=1.0)
-    wind_twh = st.slider('Wind [TWh/Jahr]', min_value=0.2, max_value=10.0, value=4.0, step=0.1)
-    efficiency_twh = st.slider('Effizienzmassnahmen [TWh/Jahr]', min_value=0.0, max_value=15.0, value=5.0, step=0.5)
-    nuclear_gw = st.slider('AKW-Leistung [GW]', min_value=0.0, max_value=3.0, value=1.6, step=0.1)
-    battery_gwh = st.slider('Batteriespeicher [GWh]', min_value=50, max_value=200, value=100, step=10)
+# Speicherwasserkraft Sommer als feste Produktion
+HYDRO_SUMMER_TWH = 9.8
 
-    st.markdown('---')
-    st.caption('Fix eingebaut: Pumpspeicher, Speicherwasserkraft Sommer und Speicherwasserkraft Winter, kein Export')
-    st.caption(f'Restliche Anlagen ohne Speicherwasserkraft: {REST_TWH:.1f} TWh/Jahr')
-    st.caption('Speicherwasserkraft Sommer: 9.8 TWh/Jahr')
-    st.caption('Speicherwasserkraft Winter flexibel: max. 8.0 TWh')
-    st.caption(f'Pumpspeicher: {PHS_ENERGY_GWH:.0f} GWh, {PHS_POWER_GW:.1f} GW')
+# Pumpspeicher
+PHS_ENERGY_GWH = 30.0
+PHS_POWER_GW = 3.0
 
-inputs = SimulationInputs(
-    pv_twh=pv_twh,
-    wind_twh=wind_twh,
-    efficiency_twh=efficiency_twh,
-    nuclear_gw=nuclear_gw,
-    battery_gwh=float(battery_gwh),
-)
-results = run_simulation(inputs)
+# Flexible Speicherwasserkraft im Winterhalbjahr
+HYDRO_WINTER_MAX_TWH = 8.0  # Oktober-März
+WINTER_MONTHS = {10, 11, 12, 1, 2, 3}
+SUMMER_MONTHS = {4, 5, 6, 7, 8, 9}
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric('Abregelung', f'{results.curtailed_twh:.2f} TWh/Jahr')
-c2.metric('Jahreslast nach Effizienz', f'{results.annual_load_after_eff_twh:.1f} TWh')
-c3.metric('Speicherwasserkraft Winter eingesetzt', f'{results.hydro_used_twh:.2f} TWh')
-c4.metric('Rest-Unterdeckung', f'{results.unmet_twh:.2f} TWh')
 
-st.subheader('Jährliche Strommengen')
-summary_df = pd.DataFrame({
-    'Kategorie': [
-        'Last vor Effizienz',
-        'Last nach Effizienz',
-        'Gesamtproduktion inkl. Speicherwasserkraft',
-        'Abregelung',
-        'Speicherwasserkraft Winter eingesetzt',
-        'Rest-Unterdeckung',
-    ],
-    'TWh': [
-        results.annual_load_twh,
-        results.annual_load_after_eff_twh,
-        results.annual_generation_twh,
-        results.curtailed_twh,
-        results.hydro_used_twh,
-        results.unmet_twh,
-    ]
-})
-st.dataframe(summary_df, use_container_width=True, hide_index=True)
+@dataclass
+class SimulationInputs:
+    pv_twh: float
+    wind_twh: float
+    efficiency_twh: float
+    nuclear_gw: float
+    battery_gwh: float
 
-st.subheader('Produktion nach Technologie')
-gen_df = pd.DataFrame({
-    'Technologie': list(results.generation_breakdown_twh.keys()),
-    'TWh': list(results.generation_breakdown_twh.values()),
-})
-st.dataframe(gen_df, use_container_width=True, hide_index=True)
 
-st.subheader('Zeitreihe für ausgewähltes Fenster')
-start = results.hourly['timestamp'].min()
-end = results.hourly['timestamp'].max() - pd.Timedelta(days=7)
-default_start = pd.Timestamp(results.hourly['timestamp'].min()) + pd.Timedelta(days=15)
-window_start = st.date_input('Startdatum', value=default_start.date(), min_value=start.date(), max_value=end.date())
-window_hours = 72
+@dataclass
+class SimulationResults:
+    hourly: pd.DataFrame
+    curtailed_twh: float
+    unmet_twh: float
+    hydro_used_twh: float
+    final_battery_gwh: float
+    final_phs_gwh: float
+    annual_load_twh: float
+    annual_load_after_eff_twh: float
+    annual_generation_twh: float
+    generation_breakdown_twh: dict
 
-view = results.hourly[
-    (results.hourly['timestamp'] >= pd.Timestamp(window_start))
-    & (results.hourly['timestamp'] < pd.Timestamp(window_start) + pd.Timedelta(hours=window_hours))
-].copy()
 
-view['prod_with_hydro_mwh'] = view['gross_generation_mwh'] + view['hydro_dispatch_mwh']
+def load_profiles() -> dict[str, pd.DataFrame]:
+    profiles = {}
+    for name in ['load', 'pv', 'wind', 'rest', 'nuclear']:
+        path = DATA_DIR / f'{name}_profile.csv'
+        df = pd.read_csv(path, parse_dates=['timestamp'])
+        profiles[name] = df
+    return profiles
 
-fig1, ax1 = plt.subplots(figsize=(10, 4))
-ax1.plot(view['timestamp'], view['load_after_eff_mwh'] / 1e3, label='Last nach Effizienz [GWh/h]')
-ax1.plot(view['timestamp'], view['gross_generation_mwh'] / 1e3, label='Produktion inkl. Speicherwasserkraft Sommer [GWh/h]')
-ax1.plot(view['timestamp'], view['prod_with_hydro_mwh'] / 1e3, label='Produktion inkl. Speicherwasserkraft Sommer + Winter [GWh/h]')
-ax1.set_ylabel('GWh pro Stunde')
-ax1.legend()
-ax1.grid(True, alpha=0.3)
-ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %Hh'))
-fig1.autofmt_xdate()
-st.pyplot(fig1)
 
-st.subheader('Speicherfüllstände')
-fig2, ax2 = plt.subplots(figsize=(10, 4))
-ax2.plot(view['timestamp'], view['battery_soc_mwh'] / 1e3, label='Batterie [GWh]')
-ax2.plot(view['timestamp'], view['phs_soc_mwh'] / 1e3, label='Pumpspeicher [GWh]')
-ax2.set_ylabel('GWh')
-ax2.legend()
-ax2.grid(True, alpha=0.3)
-ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %Hh'))
-fig2.autofmt_xdate()
-st.pyplot(fig2)
+def _apply_efficiency(load_mwh: np.ndarray, efficiency_twh: float) -> np.ndarray:
+    annual_load_twh = load_mwh.sum() / 1e6
+    reduction_frac = min(max(efficiency_twh / annual_load_twh, 0.0), 0.95)
+    return load_mwh * (1.0 - reduction_frac)
 
-st.subheader('Monatliche Abregelung')
-monthly = results.hourly.groupby('month', as_index=False)['curtailed_mwh'].sum()
-fig3, ax3 = plt.subplots(figsize=(10, 4))
-ax3.bar(monthly['month'], monthly['curtailed_mwh'] / 1e6)
-ax3.set_xlabel('Monat')
-ax3.set_ylabel('Abregelung [TWh]')
-ax3.set_xticks(range(1, 13))
-ax3.grid(True, axis='y', alpha=0.3)
-st.pyplot(fig3)
 
-st.subheader('Monatsbilanz nach Technologien')
+def run_simulation(inputs: SimulationInputs) -> SimulationResults:
+    profiles = load_profiles()
+    timestamps = profiles['load']['timestamp']
 
-month_names = {
-    1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April',
-    5: 'Mai', 6: 'Juni', 7: 'Juli', 8: 'August',
-    9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
-}
+    load_mwh = profiles['load']['profile'].to_numpy() * BASE_LOAD_TWH * 1e6
+    load_after_eff_mwh = _apply_efficiency(load_mwh, inputs.efficiency_twh)
 
-selected_month = st.selectbox(
-    'Monat auswählen',
-    options=list(month_names.keys()),
-    format_func=lambda m: month_names[m],
-    index=0,
-)
+    pv_mwh = profiles['pv']['profile'].to_numpy() * inputs.pv_twh * 1e6
+    wind_mwh = profiles['wind']['profile'].to_numpy() * inputs.wind_twh * 1e6
+    rest_mwh = profiles['rest']['profile'].to_numpy() * REST_TWH * 1e6
+    nuclear_mwh = profiles['nuclear']['profile'].to_numpy() * inputs.nuclear_gw * 8760.0 * 1e3
 
-month_view = results.hourly[results.hourly['month'] == selected_month].copy()
+    # Speicherwasserkraft Sommer als feste Produktion nur in April-September
+    summer_mask = timestamps.dt.month.isin(SUMMER_MONTHS).to_numpy().astype(float)
+    if summer_mask.sum() > 0:
+        hydro_summer_profile = summer_mask / summer_mask.sum()
+    else:
+        hydro_summer_profile = summer_mask
 
-monthly_load_twh = month_view['load_after_eff_mwh'].sum() / 1e6
-monthly_pv_twh = month_view['pv_mwh'].sum() / 1e6
-monthly_wind_twh = month_view['wind_mwh'].sum() / 1e6
-monthly_nuclear_twh = month_view['nuclear_mwh'].sum() / 1e6
-monthly_rest_twh = month_view['rest_mwh'].sum() / 1e6
-monthly_hydro_summer_twh = month_view['hydro_summer_mwh'].sum() / 1e6
-monthly_hydro_winter_twh = month_view['hydro_dispatch_mwh'].sum() / 1e6
+    hydro_summer_mwh = hydro_summer_profile * HYDRO_SUMMER_TWH * 1e6
 
-fig4, ax4 = plt.subplots(figsize=(9, 5))
+    # Gesamtproduktion ohne flexible Winter-Speicherwasserkraft
+    gross_generation_mwh = pv_mwh + wind_mwh + rest_mwh + nuclear_mwh + hydro_summer_mwh
 
-bottom = 0.0
-for label, value in [
-    ('PV', monthly_pv_twh),
-    ('Wind', monthly_wind_twh),
-    ('AKW', monthly_nuclear_twh),
-    ('Restliche Anlagen', monthly_rest_twh),
-    ('Speicherwasserkraft Sommer', monthly_hydro_summer_twh),
-    ('Speicherwasserkraft Winter', monthly_hydro_winter_twh),
-]:
-    ax4.bar('Produktion', value, bottom=bottom, label=label)
-    bottom += value
+    n = len(timestamps)
 
-ax4.bar('Strombedarf', monthly_load_twh, label='Strombedarf')
-ax4.set_ylabel('TWh')
-ax4.set_title(f'Monatsbilanz {month_names[selected_month]}')
-ax4.grid(True, axis='y', alpha=0.3)
-ax4.legend()
-st.pyplot(fig4)
+    # Startfüllstände
+    battery_soc = 0.5 * inputs.battery_gwh * 1e3
+    phs_soc = 0.5 * PHS_ENERGY_GWH * 1e3
+    hydro_remaining_mwh = HYDRO_WINTER_MAX_TWH * 1e6
 
-st.subheader('Stündliche Zeitreihe für den gewählten Monat')
+    # Leistungen pro Stunde
+    battery_power_mwh = inputs.battery_gwh * 1e3  # 1C über 1h
+    phs_power_mwh = PHS_POWER_GW * 1e3
 
-month_view['total_generation_mwh'] = (
-    month_view['gross_generation_mwh'] + month_view['hydro_dispatch_mwh']
-)
+    records: list[dict] = []
+    curtailed_mwh = 0.0
+    unmet_mwh = 0.0
+    hydro_used_mwh = 0.0
 
-fig5, ax5 = plt.subplots(figsize=(12, 4))
-ax5.plot(
-    month_view['timestamp'],
-    month_view['load_after_eff_mwh'] / 1e3,
-    label='Strombedarf [GWh/h]'
-)
-ax5.plot(
-    month_view['timestamp'],
-    month_view['total_generation_mwh'] / 1e3,
-    label='Produktion [GWh/h]'
-)
-ax5.fill_between(
-    month_view['timestamp'],
-    0,
-    month_view['curtailed_mwh'] / 1e3,
-    where=(month_view['curtailed_mwh'] > 0),
-    alpha=0.3,
-    label='Abregelung [GWh/h]'
-)
-ax5.set_ylabel('GWh pro Stunde')
-ax5.set_title(f'Stündlicher Verlauf {month_names[selected_month]}')
-ax5.grid(True, alpha=0.3)
-ax5.legend()
-ax5.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %Hh'))
-fig5.autofmt_xdate()
-st.pyplot(fig5)
+    for i in range(n):
+        ts = timestamps.iloc[i]
+        net_mwh = gross_generation_mwh[i] - load_after_eff_mwh[i]
 
-monthly_curtailed_twh = month_view['curtailed_mwh'].sum() / 1e6
-st.caption(f'Abregelung im {month_names[selected_month]}: {monthly_curtailed_twh:.2f} TWh')
+        batt_charge = 0.0
+        batt_discharge = 0.0
+        phs_charge = 0.0
+        phs_discharge = 0.0
+        hydro_dispatch = 0.0
+        curtailed = 0.0
+        unmet = 0.0
 
-with st.expander('Vereinfachungen und Annahmen'):
-    st.markdown(
-        '- Synthetische Stundenprofile für Last, PV, Wind, Restproduktion und AKW.\n'
-        '- Batteriespeicher mit 1C Lade-/Entladeleistung und 100 % Wirkungsgrad.\n'
-        '- Pumpspeicher mit fixer heutiger Grössenordnung.\n'
-        '- Speicherwasserkraft Sommer als feste Produktion von 9.8 TWh im Sommerhalbjahr.\n'
-        '- Speicherwasserkraft Winter nur Oktober bis März mit maximal 8 TWh Winterenergie.\n'
-        '- Kein Export. Verbleibende Überschüsse werden abgeregelt.\n'
-        '- Die Speicherbilanz läuft stündlich und rollierend über das ganze Jahr.\n'
-        '- Kurzfristige Verschiebung wird über Batterie und Pumpspeicher abgebildet, nicht über ein separates Bilanzfenster.'
+        if net_mwh >= 0:
+            # Batterie zuerst laden
+            batt_charge = min(net_mwh, battery_power_mwh, inputs.battery_gwh * 1e3 - battery_soc)
+            battery_soc += batt_charge
+            net_mwh -= batt_charge
+
+            # Dann Pumpspeicher laden
+            phs_charge = min(net_mwh, phs_power_mwh, PHS_ENERGY_GWH * 1e3 - phs_soc)
+            phs_soc += phs_charge
+            net_mwh -= phs_charge
+
+            # Rest wird abgeregelt
+            curtailed = max(net_mwh, 0.0)
+            curtailed_mwh += curtailed
+
+        else:
+            deficit = -net_mwh
+
+            # Batterie zuerst entladen
+            batt_discharge = min(deficit, battery_power_mwh, battery_soc)
+            battery_soc -= batt_discharge
+            deficit -= batt_discharge
+
+            # Dann Pumpspeicher entladen
+            phs_discharge = min(deficit, phs_power_mwh, phs_soc)
+            phs_soc -= phs_discharge
+            deficit -= phs_discharge
+
+            # Danach flexible Winter-Speicherwasserkraft
+            if ts.month in WINTER_MONTHS and hydro_remaining_mwh > 0:
+                hydro_dispatch = min(deficit, hydro_remaining_mwh)
+                hydro_remaining_mwh -= hydro_dispatch
+                hydro_used_mwh += hydro_dispatch
+                deficit -= hydro_dispatch
+
+            # Verbleibende Unterdeckung
+            unmet = max(deficit, 0.0)
+            unmet_mwh += unmet
+
+        records.append({
+            'timestamp': ts,
+            'load_mwh': load_mwh[i],
+            'load_after_eff_mwh': load_after_eff_mwh[i],
+            'pv_mwh': pv_mwh[i],
+            'wind_mwh': wind_mwh[i],
+            'rest_mwh': rest_mwh[i],
+            'nuclear_mwh': nuclear_mwh[i],
+            'hydro_summer_mwh': hydro_summer_mwh[i],
+            'gross_generation_mwh': gross_generation_mwh[i],
+            'battery_soc_mwh': battery_soc,
+            'phs_soc_mwh': phs_soc,
+            'battery_charge_mwh': batt_charge,
+            'battery_discharge_mwh': batt_discharge,
+            'phs_charge_mwh': phs_charge,
+            'phs_discharge_mwh': phs_discharge,
+            'hydro_dispatch_mwh': hydro_dispatch,
+            'curtailed_mwh': curtailed,
+            'unmet_mwh': unmet,
+        })
+
+    hourly = pd.DataFrame(records)
+    hourly['month'] = hourly['timestamp'].dt.month
+
+    return SimulationResults(
+        hourly=hourly,
+        curtailed_twh=curtailed_mwh / 1e6,
+        unmet_twh=unmet_mwh / 1e6,
+        hydro_used_twh=hydro_used_mwh / 1e6,
+        final_battery_gwh=battery_soc / 1e3,
+        final_phs_gwh=phs_soc / 1e3,
+        annual_load_twh=load_mwh.sum() / 1e6,
+        annual_load_after_eff_twh=load_after_eff_mwh.sum() / 1e6,
+        annual_generation_twh=(gross_generation_mwh.sum() + hydro_used_mwh) / 1e6,
+        generation_breakdown_twh={
+            'PV': pv_mwh.sum() / 1e6,
+            'Wind': wind_mwh.sum() / 1e6,
+            'AKW': nuclear_mwh.sum() / 1e6,
+            'Restliche Anlagen ohne Speicherwasserkraft': rest_mwh.sum() / 1e6,
+            'Speicherwasserkraft Sommer': hydro_summer_mwh.sum() / 1e6,
+            'Speicherwasserkraft Winter': hydro_used_mwh / 1e6,
+        },
     )
