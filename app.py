@@ -37,7 +37,6 @@ inputs = SimulationInputs(
     nuclear_gw=nuclear_gw,
     battery_gwh=float(battery_gwh),
 )
-
 results = run_simulation(inputs)
 
 c1, c2, c3, c4 = st.columns(4)
@@ -79,7 +78,7 @@ start = results.hourly['timestamp'].min()
 end = results.hourly['timestamp'].max() - pd.Timedelta(days=7)
 default_start = pd.Timestamp(results.hourly['timestamp'].min()) + pd.Timedelta(days=15)
 window_start = st.date_input('Startdatum', value=default_start.date(), min_value=start.date(), max_value=end.date())
-window_hours = 120
+window_hours = 72
 
 view = results.hourly[
     (results.hourly['timestamp'] >= pd.Timestamp(window_start))
@@ -119,6 +118,88 @@ ax3.set_ylabel('Abregelung [TWh]')
 ax3.set_xticks(range(1, 13))
 ax3.grid(True, axis='y', alpha=0.3)
 st.pyplot(fig3)
+
+st.subheader('Monatsbilanz nach Technologien')
+
+month_names = {
+    1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April',
+    5: 'Mai', 6: 'Juni', 7: 'Juli', 8: 'August',
+    9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
+}
+
+selected_month = st.selectbox(
+    'Monat auswählen',
+    options=list(month_names.keys()),
+    format_func=lambda m: month_names[m],
+    index=0,
+)
+
+month_view = results.hourly[results.hourly['month'] == selected_month].copy()
+
+monthly_load_twh = month_view['load_after_eff_mwh'].sum() / 1e6
+monthly_pv_twh = month_view['pv_mwh'].sum() / 1e6
+monthly_wind_twh = month_view['wind_mwh'].sum() / 1e6
+monthly_nuclear_twh = month_view['nuclear_mwh'].sum() / 1e6
+monthly_rest_twh = month_view['rest_mwh'].sum() / 1e6
+monthly_hydro_summer_twh = month_view['hydro_summer_mwh'].sum() / 1e6
+monthly_hydro_winter_twh = month_view['hydro_dispatch_mwh'].sum() / 1e6
+
+fig4, ax4 = plt.subplots(figsize=(9, 5))
+
+bottom = 0.0
+for label, value in [
+    ('PV', monthly_pv_twh),
+    ('Wind', monthly_wind_twh),
+    ('AKW', monthly_nuclear_twh),
+    ('Restliche Anlagen', monthly_rest_twh),
+    ('Speicherwasserkraft Sommer', monthly_hydro_summer_twh),
+    ('Speicherwasserkraft Winter', monthly_hydro_winter_twh),
+]:
+    ax4.bar('Produktion', value, bottom=bottom, label=label)
+    bottom += value
+
+ax4.bar('Strombedarf', monthly_load_twh, label='Strombedarf')
+ax4.set_ylabel('TWh')
+ax4.set_title(f'Monatsbilanz {month_names[selected_month]}')
+ax4.grid(True, axis='y', alpha=0.3)
+ax4.legend()
+st.pyplot(fig4)
+
+st.subheader('Stündliche Zeitreihe für den gewählten Monat')
+
+month_view['total_generation_mwh'] = (
+    month_view['gross_generation_mwh'] + month_view['hydro_dispatch_mwh']
+)
+
+fig5, ax5 = plt.subplots(figsize=(12, 4))
+ax5.plot(
+    month_view['timestamp'],
+    month_view['load_after_eff_mwh'] / 1e3,
+    label='Strombedarf [GWh/h]'
+)
+ax5.plot(
+    month_view['timestamp'],
+    month_view['total_generation_mwh'] / 1e3,
+    label='Produktion [GWh/h]'
+)
+ax5.fill_between(
+    month_view['timestamp'],
+    0,
+    month_view['curtailed_mwh'] / 1e3,
+    where=(month_view['curtailed_mwh'] > 0),
+    alpha=0.3,
+    label='Abregelung [GWh/h]'
+)
+ax5.set_ylabel('GWh pro Stunde')
+ax5.set_title(f'Stündlicher Verlauf {month_names[selected_month]}')
+ax5.grid(True, alpha=0.3)
+ax5.legend()
+ax5.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %Hh'))
+fig5.autofmt_xdate()
+st.pyplot(fig5)
+
+monthly_curtailed_twh = month_view['curtailed_mwh'].sum() / 1e6
+st.caption(f'Abregelung im {month_names[selected_month]}: {monthly_curtailed_twh:.2f} TWh')
 
 with st.expander('Vereinfachungen und Annahmen'):
     st.markdown(
