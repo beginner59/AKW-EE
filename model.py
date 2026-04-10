@@ -10,11 +10,21 @@ DATA_DIR = Path(__file__).resolve().parent / 'data'
 
 # Fixed assumptions for prototype v1
 BASE_LOAD_TWH = 92.0
-REST_TWH = 18.0
+
+# Restliche Anlagen ohne Speicherwasserkraft:
+# Laufwasserkraft + Biomasse/Biogas + erneuerbarer thermischer/KVA-Anteil
+REST_TWH = 20.0
+
+# Speicherwasserkraft Sommer als feste Produktion
+HYDRO_SUMMER_TWH = 9.8
+
 PHS_ENERGY_GWH = 30.0
 PHS_POWER_GW = 3.0
-HYDRO_SEASONAL_MAX_TWH = 8.0  # October-March
+
+# Flexible Speicherwasserkraft im Winterhalbjahr
+HYDRO_WINTER_MAX_TWH = 8.0  # October-March
 WINTER_MONTHS = {10, 11, 12, 1, 2, 3}
+SUMMER_MONTHS = {4, 5, 6, 7, 8, 9}
 
 
 @dataclass
@@ -41,7 +51,6 @@ class SimulationResults:
     generation_breakdown_twh: dict
 
 
-
 def load_profiles() -> dict[str, pd.DataFrame]:
     profiles = {}
     for name in ['load', 'pv', 'wind', 'rest', 'nuclear']:
@@ -51,12 +60,10 @@ def load_profiles() -> dict[str, pd.DataFrame]:
     return profiles
 
 
-
 def _apply_efficiency(load_mwh: np.ndarray, efficiency_twh: float) -> np.ndarray:
     annual_load_twh = load_mwh.sum() / 1e6
     reduction_frac = min(max(efficiency_twh / annual_load_twh, 0.0), 0.95)
     return load_mwh * (1.0 - reduction_frac)
-
 
 
 def run_simulation(inputs: SimulationInputs) -> SimulationResults:
@@ -71,12 +78,21 @@ def run_simulation(inputs: SimulationInputs) -> SimulationResults:
     rest_mwh = profiles['rest']['profile'].to_numpy() * REST_TWH * 1e6
     nuclear_mwh = profiles['nuclear']['profile'].to_numpy() * inputs.nuclear_gw * 8760.0 * 1e3
 
-    gross_generation_mwh = pv_mwh + wind_mwh + rest_mwh + nuclear_mwh
+    # Speicherwasserkraft Sommer als feste Produktion nur in April-September
+    summer_mask = timestamps.dt.month.isin(SUMMER_MONTHS).to_numpy().astype(float)
+    if summer_mask.sum() > 0:
+        hydro_summer_profile = summer_mask / summer_mask.sum()
+    else:
+        hydro_summer_profile = summer_mask
+
+    hydro_summer_mwh = hydro_summer_profile * HYDRO_SUMMER_TWH * 1e6
+
+    gross_generation_mwh = pv_mwh + wind_mwh + rest_mwh + nuclear_mwh + hydro_summer_mwh
 
     n = len(timestamps)
     battery_soc = 0.5 * inputs.battery_gwh * 1e3
     phs_soc = 0.5 * PHS_ENERGY_GWH * 1e3
-    hydro_remaining_mwh = HYDRO_SEASONAL_MAX_TWH * 1e6
+    hydro_remaining_mwh = HYDRO_WINTER_MAX_TWH * 1e6
 
     battery_power_mwh = inputs.battery_gwh * 1e3  # 1C over 1h
     phs_power_mwh = PHS_POWER_GW * 1e3
@@ -135,6 +151,7 @@ def run_simulation(inputs: SimulationInputs) -> SimulationResults:
             'wind_mwh': wind_mwh[i],
             'rest_mwh': rest_mwh[i],
             'nuclear_mwh': nuclear_mwh[i],
+            'hydro_summer_mwh': hydro_summer_mwh[i],
             'gross_generation_mwh': gross_generation_mwh[i],
             'battery_soc_mwh': battery_soc,
             'phs_soc_mwh': phs_soc,
@@ -161,10 +178,11 @@ def run_simulation(inputs: SimulationInputs) -> SimulationResults:
         annual_load_after_eff_twh=load_after_eff_mwh.sum() / 1e6,
         annual_generation_twh=(gross_generation_mwh.sum() + hydro_used_mwh) / 1e6,
         generation_breakdown_twh={
-        'PV': pv_mwh.sum() / 1e6,
-        'Wind': wind_mwh.sum() / 1e6,
-        'AKW': nuclear_mwh.sum() / 1e6,
-        'Restliche Anlagen': rest_mwh.sum() / 1e6,
-        'Speicherwasserkraft': hydro_used_mwh / 1e6,
+            'PV': pv_mwh.sum() / 1e6,
+            'Wind': wind_mwh.sum() / 1e6,
+            'AKW': nuclear_mwh.sum() / 1e6,
+            'Restliche Anlagen ohne Speicherwasserkraft': rest_mwh.sum() / 1e6,
+            'Speicherwasserkraft Sommer': hydro_summer_mwh.sum() / 1e6,
+            'Speicherwasserkraft Winter': hydro_used_mwh / 1e6,
         },
     )
