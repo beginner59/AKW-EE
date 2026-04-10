@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 from model import PHS_ENERGY_GWH, PHS_POWER_GW, REST_TWH, SimulationInputs, run_simulation
 
@@ -86,6 +87,8 @@ ax1.plot(view['timestamp'], view['prod_with_hydro_mwh'] / 1e3, label='Produktion
 ax1.set_ylabel('GWh pro Stunde')
 ax1.legend()
 ax1.grid(True, alpha=0.3)
+ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %Hh'))
+fig1.autofmt_xdate()
 st.pyplot(fig1)
 
 st.subheader('Speicherfüllstände')
@@ -95,6 +98,8 @@ ax2.plot(view['timestamp'], view['phs_soc_mwh'] / 1e3, label='Pumpspeicher [GWh]
 ax2.set_ylabel('GWh')
 ax2.legend()
 ax2.grid(True, alpha=0.3)
+ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m %Hh'))
+fig2.autofmt_xdate()
 st.pyplot(fig2)
 
 st.subheader('Monatliche Abregelung')
