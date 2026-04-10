@@ -34,7 +34,6 @@ class SimulationInputs:
     efficiency_twh: float
     nuclear_gw: float
     battery_gwh: float
-    balance_days: int
 
 
 @dataclass
