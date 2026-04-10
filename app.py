@@ -25,8 +25,10 @@ with st.sidebar:
     balance_days = st.slider('Bilanzfenster [Tage]', min_value=2, max_value=5, value=3, step=1)
 
     st.markdown('---')
-    st.caption('Fix eingebaut: Restliche Anlagen, Pumpspeicher, Speicherwasserkraft (Okt-März), kein Export')
-    st.caption(f'Restliche Anlagen: {REST_TWH:.1f} TWh/Jahr')
+    st.caption('Fix eingebaut: Pumpspeicher, Speicherwasserkraft Sommer und Speicherwasserkraft Winter, kein Export')
+    st.caption(f'Restliche Anlagen ohne Speicherwasserkraft: {REST_TWH:.1f} TWh/Jahr')
+    st.caption('Speicherwasserkraft Sommer: 9.8 TWh/Jahr')
+    st.caption('Speicherwasserkraft Winter flexibel: max. 8.0 TWh')
     st.caption(f'Pumpspeicher: {PHS_ENERGY_GWH:.0f} GWh, {PHS_POWER_GW:.1f} GW')
 
 inputs = SimulationInputs(
@@ -42,12 +44,19 @@ results = run_simulation(inputs)
 c1, c2, c3, c4 = st.columns(4)
 c1.metric('Abregelung', f'{results.curtailed_twh:.2f} TWh/Jahr')
 c2.metric('Jahreslast nach Effizienz', f'{results.annual_load_after_eff_twh:.1f} TWh')
-c3.metric('Speicherwasserkraft eingesetzt', f'{results.hydro_used_twh:.2f} TWh')
+c3.metric('Speicherwasserkraft Winter eingesetzt', f'{results.hydro_used_twh:.2f} TWh')
 c4.metric('Rest-Unterdeckung', f'{results.unmet_twh:.2f} TWh')
 
 st.subheader('Jährliche Strommengen')
 summary_df = pd.DataFrame({
-    'Kategorie': ['Last vor Effizienz', 'Last nach Effizienz', 'Gesamtproduktion', 'Abregelung', 'Speicherwasserkraft', 'Rest-Unterdeckung'],
+    'Kategorie': [
+        'Last vor Effizienz',
+        'Last nach Effizienz',
+        'Gesamtproduktion inkl. Speicherwasserkraft',
+        'Abregelung',
+        'Speicherwasserkraft Winter eingesetzt',
+        'Rest-Unterdeckung',
+    ],
     'TWh': [
         results.annual_load_twh,
         results.annual_load_after_eff_twh,
@@ -82,8 +91,8 @@ view['prod_with_hydro_mwh'] = view['gross_generation_mwh'] + view['hydro_dispatc
 
 fig1, ax1 = plt.subplots(figsize=(10, 4))
 ax1.plot(view['timestamp'], view['load_after_eff_mwh'] / 1e3, label='Last nach Effizienz [GWh/h]')
-ax1.plot(view['timestamp'], view['gross_generation_mwh'] / 1e3, label='Produktion ohne Speicherwasserkraft [GWh/h]')
-ax1.plot(view['timestamp'], view['prod_with_hydro_mwh'] / 1e3, label='Produktion inkl. Speicherwasserkraft [GWh/h]')
+ax1.plot(view['timestamp'], view['gross_generation_mwh'] / 1e3, label='Produktion inkl. Speicherwasserkraft Sommer [GWh/h]')
+ax1.plot(view['timestamp'], view['prod_with_hydro_mwh'] / 1e3, label='Produktion inkl. Speicherwasserkraft Sommer + Winter [GWh/h]')
 ax1.set_ylabel('GWh pro Stunde')
 ax1.legend()
 ax1.grid(True, alpha=0.3)
@@ -117,7 +126,8 @@ with st.expander('Vereinfachungen und Annahmen'):
         '- Synthetische Stundenprofile für Last, PV, Wind, Restproduktion und AKW.\n'
         '- Batteriespeicher mit 1C Lade-/Entladeleistung und 100 % Wirkungsgrad.\n'
         '- Pumpspeicher mit fixer heutiger Grössenordnung.\n'
-        '- Speicherwasserkraft nur Oktober bis März mit maximal 8 TWh Winterenergie.\n'
+        '- Speicherwasserkraft Sommer als feste Produktion von 9.8 TWh im Sommerhalbjahr.\n'
+        '- Speicherwasserkraft Winter nur Oktober bis März mit maximal 8 TWh Winterenergie.\n'
         '- Kein Export. Verbleibende Überschüsse werden abgeregelt.\n'
         '- Das Bilanzfenster wird in dieser ersten Version didaktisch für die Anzeige genutzt; '
         'die Speicherbilanz läuft stündlich und rollierend über das ganze Jahr.'
