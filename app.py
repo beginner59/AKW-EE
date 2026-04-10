@@ -19,7 +19,7 @@ with st.sidebar:
     pv_twh = st.slider('PV [TWh/Jahr]', min_value=30.0, max_value=60.0, value=45.0, step=1.0)
     wind_twh = st.slider('Wind [TWh/Jahr]', min_value=0.2, max_value=10.0, value=4.0, step=0.1)
     efficiency_twh = st.slider('Effizienzmassnahmen [TWh/Jahr]', min_value=0.0, max_value=15.0, value=5.0, step=0.5)
-    nuclear_gw = st.slider('AKW-Leistung [GW]', min_value=1.0, max_value=3.0, value=1.6, step=0.1)
+    nuclear_gw = st.slider('AKW-Leistung [GW]', min_value=0.0, max_value=3.0, value=1.6, step=0.1)
     battery_gwh = st.slider('Batteriespeicher [GWh]', min_value=50, max_value=200, value=100, step=10)
     balance_days = st.slider('Bilanzfenster [Tage]', min_value=2, max_value=5, value=3, step=1)
 
