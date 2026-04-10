@@ -160,11 +160,11 @@ def run_simulation(inputs: SimulationInputs) -> SimulationResults:
         annual_load_twh=load_mwh.sum() / 1e6,
         annual_load_after_eff_twh=load_after_eff_mwh.sum() / 1e6,
         annual_generation_twh=(gross_generation_mwh.sum() + hydro_used_mwh) / 1e6,
-generation_breakdown_twh={
-    'PV': pv_mwh.sum() / 1e6,
-    'Wind': wind_mwh.sum() / 1e6,
-    'AKW': nuclear_mwh.sum() / 1e6,
-    'Restliche Anlagen': rest_mwh.sum() / 1e6,
-    'Speicherwasserkraft': hydro_used_mwh / 1e6,
-},
+        generation_breakdown_twh={
+        'PV': pv_mwh.sum() / 1e6,
+        'Wind': wind_mwh.sum() / 1e6,
+        'AKW': nuclear_mwh.sum() / 1e6,
+        'Restliche Anlagen': rest_mwh.sum() / 1e6,
+        'Speicherwasserkraft': hydro_used_mwh / 1e6,
+        },
     )
