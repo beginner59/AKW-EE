@@ -23,7 +23,7 @@ PHS_ENERGY_GWH = 30.0
 PHS_POWER_GW = 3.0
 
 # Flexible Speicherwasserkraft im Winterhalbjahr
-HYDRO_WINTER_MAX_TWH = 8.0  # Oktober-März
+HYDRO_WINTER_MAX_TWH = 10.0  # Oktober-März
 WINTER_MONTHS = {10, 11, 12, 1, 2, 3}
 SUMMER_MONTHS = {4, 5, 6, 7, 8, 9}
 
